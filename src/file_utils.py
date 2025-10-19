@@ -7,12 +7,10 @@ binary_path = 'data/epileptic_seizure_recognition_binary.csv'
 
 
 def read_csv(file_path: str) -> pd.DataFrame:
-    """Read a CSV file into a DataFrame."""
     return pd.read_csv(file_path)
 
 
 def split_features_labels(df: pd.DataFrame, target_column: str | None = None) -> tuple[pd.DataFrame, pd.Series]:
-    """Split a DataFrame into feature (X) and target (y) sets."""
     if target_column is None:
         target_column = df.columns[-1]
 
@@ -23,7 +21,6 @@ def split_features_labels(df: pd.DataFrame, target_column: str | None = None) ->
 
 
 def load_and_split_data(file_path: str, target_column: str | None = None) -> tuple[pd.DataFrame, pd.Series]:
-    """Load a dataset from disk and split into X/y."""
     df = read_csv(file_path)
     return split_features_labels(df, target_column)
 

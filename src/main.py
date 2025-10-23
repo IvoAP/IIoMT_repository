@@ -1,4 +1,3 @@
-"""Minimal main entry point: delega execução aos runners via argumentos simples."""
 import argparse
 from .runners.main_runner import create_main_runner
 

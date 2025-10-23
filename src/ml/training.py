@@ -14,8 +14,8 @@ from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_sc
 from sklearn.model_selection import StratifiedKFold, train_test_split
 from sklearn.preprocessing import StandardScaler
 
-from file_utils import load_and_split_data
-from ml.models import instantiate_model, suggest_model_params
+from ..file_utils import load_and_split_data
+from .models import instantiate_model, suggest_model_params
 
 DEFAULT_RANDOM_STATE = 42
 DEFAULT_RESULTS_DIR = Path("results") / "ml"

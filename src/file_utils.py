@@ -1,7 +1,6 @@
 import os
 import pandas as pd
 
-# Default dataset locations
 path = 'data/epileptic_seizure_recognition.csv'
 binary_path = 'data/epileptic_seizure_recognition_binary.csv'
 
@@ -88,4 +87,3 @@ def load_and_analyze_dataset(
         print(f"  {label_name}: {count} ({percent:.2f}%)")
 
     return X, y
-

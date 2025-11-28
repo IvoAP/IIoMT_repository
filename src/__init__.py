@@ -1,1 +1,0 @@
-"""IIoMT package root."""

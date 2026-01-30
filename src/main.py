@@ -3,9 +3,9 @@ from __future__ import annotations
 import argparse
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from collections.abc import Iterable
 from pathlib import Path
 from time import perf_counter
-from typing import Iterable
 
 import numpy as np
 import pandas as pd
@@ -117,7 +117,10 @@ def _load_dataset_numpy(dataset_path: str, target_column: str = "y") -> tuple[np
         for column in non_numeric_cols:
             X_df[column], _ = pd.factorize(X_df[column])
     X = X_df.to_numpy(dtype=float)
-    y = y_series.to_numpy()
+    if pd.api.types.is_numeric_dtype(y_series):
+        y = y_series.to_numpy()
+    else:
+        y, _ = pd.factorize(y_series)
     return X, y
 
 
@@ -356,16 +359,48 @@ def main() -> None:
         class_names=BINARY_CLASS_NAMES,
     )
 
+    load_and_analyze_dataset(
+        dataset_path=_resolve_path("data/Synthetic_patient-HealthCare-Monitoring_dataset.csv"),
+        target_column="Temperature Alert",
+        dataset_name="Synthetic healthcare dataset (Temperature Alert)",
+        class_names=None,
+    )
+
+    load_and_analyze_dataset(
+        dataset_path=_resolve_path("data/patients_data_with_alerts.csv"),
+        target_column="Temperature Alert",
+        dataset_name="D4",
+        class_names=None,
+    )
+
     dataset_runs = [
+        # D2
         {
             "name": "Original multi-class dataset",
             "path": original_dataset_path,
             "class_names": ORIGINAL_CLASS_NAMES,
+            "target_column": "y",
         },
+        # d1
         {
             "name": "Binary seizure dataset",
             "path": ensured_binary_path,
             "class_names": BINARY_CLASS_NAMES,
+            "target_column": "y",
+        },
+        # D3
+        {
+            "name": "Synthetic healthcare dataset (Temperature Alert)",
+            "path": _resolve_path("data/Synthetic_patient-HealthCare-Monitoring_dataset.csv"),
+            "class_names": None,
+            "target_column": "Temperature Alert",
+        },
+        # D4
+        {
+            "name": "D4",
+            "path": _resolve_path("data/patients_data_with_alerts.csv"),
+            "class_names": None,
+            "target_column": "Temperature Alert",
         },
     ]
 
@@ -375,7 +410,7 @@ def main() -> None:
 
     for config in dataset_runs:
         print(f"\nRunning anonymization + training for {config['name']}...")
-        X_data, y_data = _load_dataset_numpy(config["path"])
+        X_data, y_data = _load_dataset_numpy(config["path"], target_column=config.get("target_column", "y"))
         anonymized_batches = _parallel_anonymizations(
             X_data,
             y_data,
@@ -388,7 +423,7 @@ def main() -> None:
             print(f"Alpha {alpha} missing from parallel stage; retrying sequentially...")
             anonymized_batches[alpha] = anonimization_clustering(X_data, y_data, k_clusters, alpha)
 
-        if args.mode in {"stats", "ml", "mia", "both"} and not args.no_stats:
+        if args.mode in {"stats", "both"} and not args.no_stats:
             stats_bins = int(args.stats_bins)
             if stats_bins < 2:
                 raise ValueError("--stats-bins must be >= 2")

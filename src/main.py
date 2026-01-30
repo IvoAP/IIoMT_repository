@@ -60,9 +60,12 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--mode",
-        choices=["ml", "mia", "both"],
+        choices=["ml", "mia", "stats", "both"],
         default=DEFAULT_MODE,
-        help="Select whether to run ML experiments, MIA, or both (default: both).",
+        help=(
+            "Select whether to run ML experiments (ml), membership inference (mia), "
+            "distribution-shift stats only (stats), or everything (both)."
+        ),
     )
     parser.add_argument(
         "--victim-models",
@@ -385,7 +388,7 @@ def main() -> None:
             print(f"Alpha {alpha} missing from parallel stage; retrying sequentially...")
             anonymized_batches[alpha] = anonimization_clustering(X_data, y_data, k_clusters, alpha)
 
-        if not args.no_stats:
+        if args.mode in {"stats", "ml", "mia", "both"} and not args.no_stats:
             stats_bins = int(args.stats_bins)
             if stats_bins < 2:
                 raise ValueError("--stats-bins must be >= 2")

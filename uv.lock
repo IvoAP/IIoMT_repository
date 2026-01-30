@@ -249,6 +249,7 @@ dependencies = [
     { name = "optuna" },
     { name = "pandas" },
     { name = "scikit-learn" },
+    { name = "scipy" },
     { name = "tensorflow" },
     { name = "xgboost" },
 ]
@@ -259,6 +260,7 @@ requires-dist = [
     { name = "optuna", specifier = ">=4.5.0" },
     { name = "pandas", specifier = ">=2.3.3" },
     { name = "scikit-learn", specifier = ">=1.5" },
+    { name = "scipy", specifier = ">=1.11.0,<2.0.0" },
     { name = "tensorflow", specifier = ">=2.15.0,<=2.16.2" },
     { name = "xgboost", specifier = ">=2.1.0" },
 ]

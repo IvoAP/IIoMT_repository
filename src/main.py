@@ -35,6 +35,7 @@ from file_utils import (
     load_and_split_data,
     path as RELATIVE_ORIGINAL_PATH,
 )
+from distribution_metrics import per_feature_shift_metrics, summarize_shift_metrics
 from mia import evaluate_mia
 
 ALPHA_VALUES: list[float] = [0.0, 0.25, 0.5, 0.75, 1.0]
@@ -48,6 +49,7 @@ VICTIM_MODEL_CHOICES = [
     "gaussian_nb",
     "logistic_regression",
 ]
+DEFAULT_STATS_BINS = 30
 
 
 def _parse_args() -> argparse.Namespace:
@@ -80,6 +82,17 @@ def _parse_args() -> argparse.Namespace:
         type=int,
         default=DEFAULT_K,
         help="Number of KMeans clusters used inside the anonymization routine.",
+    )
+    parser.add_argument(
+        "--no-stats",
+        action="store_true",
+        help="Disable distribution-shift statistics (KL/Wasserstein).",
+    )
+    parser.add_argument(
+        "--stats-bins",
+        type=int,
+        default=DEFAULT_STATS_BINS,
+        help="Number of histogram bins used for KL divergence (default: 30).",
     )
     return parser.parse_args()
 
@@ -290,6 +303,24 @@ def _display_mia_results(results: list[dict[str, float | str]]) -> None:
     print("AUC ~0.50 => robust; AUC >0.70 => potential leakage.")
 
 
+def _display_shift_results(results: list[dict[str, float | str]]) -> None:
+    if not results:
+        print("No distribution-shift results to display.")
+        return
+    df = pd.DataFrame(results)
+    ordered_columns = [
+        "dataset",
+        "alpha",
+        "kl_mean",
+        "kl_median",
+        "wasserstein_mean",
+        "wasserstein_median",
+    ]
+    df = df[ordered_columns].sort_values(["dataset", "alpha"]).reset_index(drop=True)
+    print("\nDistribution-shift summary (per-feature KL/Wasserstein; mean/median):")
+    print(df.to_string(index=False, float_format=lambda value: f"{value:.6f}"))
+
+
 def main() -> None:
     args = _parse_args()
     alphas = args.alphas if args.alphas else ALPHA_VALUES
@@ -337,6 +368,7 @@ def main() -> None:
 
     ml_results: list[dict[str, float | str]] = []
     mia_results: list[dict[str, float | str]] = []
+    shift_results: list[dict[str, float | str]] = []
 
     for config in dataset_runs:
         print(f"\nRunning anonymization + training for {config['name']}...")
@@ -352,6 +384,33 @@ def main() -> None:
         for alpha in missing_alphas:
             print(f"Alpha {alpha} missing from parallel stage; retrying sequentially...")
             anonymized_batches[alpha] = anonimization_clustering(X_data, y_data, k_clusters, alpha)
+
+        if not args.no_stats:
+            stats_bins = int(args.stats_bins)
+            if stats_bins < 2:
+                raise ValueError("--stats-bins must be >= 2")
+            for alpha in sorted(anonymized_batches.keys()):
+                X_anon, _ = anonymized_batches[alpha]
+                try:
+                    kl_values, wass_values = per_feature_shift_metrics(
+                        X_reference=X_data,
+                        X_candidate=X_anon,
+                        bins=stats_bins,
+                    )
+                    summary = summarize_shift_metrics(kl_values, wass_values)
+                except Exception as exc:
+                    print(f"Shift stats failed for {config['name']} | alpha={alpha:.2f}: {exc}")
+                    continue
+                shift_results.append(
+                    {
+                        "dataset": config["name"],
+                        "alpha": alpha,
+                        "kl_mean": summary.kl_mean,
+                        "kl_median": summary.kl_median,
+                        "wasserstein_mean": summary.wasserstein_mean,
+                        "wasserstein_median": summary.wasserstein_median,
+                    }
+                )
 
         if args.mode in {"ml", "both"}:
             ml_results.extend(
@@ -375,6 +434,9 @@ def main() -> None:
 
     if mia_results:
         _display_mia_results(mia_results)
+
+    if shift_results:
+        _display_shift_results(shift_results)
 
 
 if __name__ == "__main__":

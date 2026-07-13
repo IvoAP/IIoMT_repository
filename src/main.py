@@ -37,6 +37,7 @@ from file_utils import (
 )
 from distribution_metrics import per_feature_shift_metrics, summarize_shift_metrics
 from mia import evaluate_mia
+from reconstruction import evaluate_reconstruction_attack
 
 ALPHA_VALUES: list[float] = [0.0, 0.25, 0.5, 0.75, 1.0]
 DEFAULT_K = 3
@@ -60,11 +61,11 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--mode",
-        choices=["ml", "mia", "stats", "both"],
+        choices=["ml", "mia", "stats", "recon", "both"],
         default=DEFAULT_MODE,
         help=(
             "Select whether to run ML experiments (ml), membership inference (mia), "
-            "distribution-shift stats only (stats), or everything (both)."
+            "distribution-shift stats only (stats), reconstruction attack (recon), or everything (both)."
         ),
     )
     parser.add_argument(
@@ -96,6 +97,21 @@ def _parse_args() -> argparse.Namespace:
         type=int,
         default=DEFAULT_STATS_BINS,
         help="Number of histogram bins used for KL divergence (default: 30).",
+    )
+    parser.add_argument(
+        "--recon-max-samples",
+        type=int,
+        default=5000,
+        help=(
+            "Max rows used by reconstruction attack per dataset/alpha to bound runtime/memory "
+            "(default: 5000; use 0 to disable sampling)."
+        ),
+    )
+    parser.add_argument(
+        "--recon-row-tolerance",
+        type=float,
+        default=0.10,
+        help="Distance threshold used to compute row reconstruction rate (default: 0.10).",
     )
     return parser.parse_args()
 
@@ -327,6 +343,28 @@ def _display_shift_results(results: list[dict[str, float | str]]) -> None:
     print(df.to_string(index=False, float_format=lambda value: f"{value:.6f}"))
 
 
+def _display_reconstruction_results(results: list[dict[str, float | str]]) -> None:
+    if not results:
+        print("No reconstruction attack results to display.")
+        return
+    df = pd.DataFrame(results)
+    ordered_columns = [
+        "dataset",
+        "alpha",
+        "evaluated_rows",
+        "total_rows",
+        "sampled",
+        "rmse",
+        "mae",
+        "median_distance",
+        "p90_distance",
+        "row_reconstruction_rate",
+    ]
+    df = df[ordered_columns].sort_values(["dataset", "alpha"]).reset_index(drop=True)
+    print("\nReconstruction attack summary (lower is better for privacy):")
+    print(df.to_string(index=False, float_format=lambda value: f"{value:.6f}"))
+
+
 def main() -> None:
     args = _parse_args()
     alphas = args.alphas if args.alphas else ALPHA_VALUES
@@ -334,6 +372,11 @@ def main() -> None:
         raise ValueError("Alpha list cannot be empty.")
     alphas = sorted(set(alphas))
     k_clusters = args.k
+    recon_max_samples = None if args.recon_max_samples == 0 else int(args.recon_max_samples)
+    if recon_max_samples is not None and recon_max_samples < 2:
+        raise ValueError("--recon-max-samples must be 0 (disabled) or >= 2")
+    if args.recon_row_tolerance <= 0:
+        raise ValueError("--recon-row-tolerance must be > 0")
 
     original_dataset_path = _resolve_path(RELATIVE_ORIGINAL_PATH)
     binary_dataset_path = _resolve_path(RELATIVE_BINARY_PATH)
@@ -407,9 +450,21 @@ def main() -> None:
     ml_results: list[dict[str, float | str]] = []
     mia_results: list[dict[str, float | str]] = []
     shift_results: list[dict[str, float | str]] = []
+    reconstruction_results: list[dict[str, float | str]] = []
 
     for config in dataset_runs:
-        print(f"\nRunning anonymization + training for {config['name']}...")
+        if args.mode == "recon":
+            stage_label = "anonymization + reconstruction"
+        elif args.mode == "stats":
+            stage_label = "anonymization + distribution-shift stats"
+        elif args.mode == "mia":
+            stage_label = "anonymization + membership inference"
+        elif args.mode == "ml":
+            stage_label = "anonymization + model training"
+        else:
+            stage_label = "anonymization + full evaluation"
+
+        print(f"\nRunning {stage_label} for {config['name']}...")
         X_data, y_data = _load_dataset_numpy(config["path"], target_column=config.get("target_column", "y"))
         anonymized_batches = _parallel_anonymizations(
             X_data,
@@ -450,6 +505,38 @@ def main() -> None:
                     }
                 )
 
+        if args.mode in {"recon", "both"}:
+            for alpha in sorted(anonymized_batches.keys()):
+                X_anon, _ = anonymized_batches[alpha]
+                print(
+                    f"Evaluating reconstruction attack for {config['name']} | alpha={alpha:.2f}"
+                )
+                try:
+                    recon_result = evaluate_reconstruction_attack(
+                        X_data,
+                        X_anon,
+                        row_tolerance=float(args.recon_row_tolerance),
+                        max_samples=recon_max_samples,
+                        random_state=RANDOM_STATE,
+                    )
+                except Exception as exc:
+                    print(f"Reconstruction attack failed for {config['name']} | alpha={alpha:.2f}: {exc}")
+                    continue
+                reconstruction_results.append(
+                    {
+                        "dataset": config["name"],
+                        "alpha": alpha,
+                        "evaluated_rows": recon_result.evaluated_rows,
+                        "total_rows": recon_result.total_rows,
+                        "sampled": recon_result.sampled,
+                        "rmse": recon_result.rmse,
+                        "mae": recon_result.mae,
+                        "median_distance": recon_result.median_distance,
+                        "p90_distance": recon_result.p90_distance,
+                        "row_reconstruction_rate": recon_result.row_reconstruction_rate,
+                    }
+                )
+
         if args.mode in {"ml", "both"}:
             ml_results.extend(
                 _run_ml_pipeline_for_dataset(
@@ -475,6 +562,9 @@ def main() -> None:
 
     if shift_results:
         _display_shift_results(shift_results)
+
+    if reconstruction_results:
+        _display_reconstruction_results(reconstruction_results)
 
 
 if __name__ == "__main__":
